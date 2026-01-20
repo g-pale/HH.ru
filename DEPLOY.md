@@ -1,4 +1,4 @@
-# Инструкция по развертыванию на сервере Selectel
+# Инструкция по развертыванию на сервере
 
 ## Требования к серверу
 
@@ -12,9 +12,9 @@
 ### 1. Подключение к серверу
 
 ```bash
-ssh selectel
+ssh your-server
 # или если используете прямой доступ:
-# ssh root@84.38.181.117
+# ssh root@your-server-ip
 ```
 
 ### 2. Обновление системы
@@ -140,19 +140,19 @@ git clone <ваш_репозиторий> /opt/hh-bot
 **Вариант Б: Через scp с локального компьютера**
 На вашем локальном компьютере:
 ```bash
-scp -r /Users/sergejsaburkin/PythonProject/HH.ru/* selectel:/opt/hh-bot/
+scp -r /path/to/project/HH.ru/* your-server:/opt/hh-bot/
 # или если используете прямой доступ:
-# scp -r /Users/sergejsaburkin/PythonProject/HH.ru/* root@84.38.181.117:/opt/hh-bot/
+# scp -r /path/to/project/HH.ru/* root@your-server-ip:/opt/hh-bot/
 ```
 
 **Вариант В: Через rsync (рекомендуется)**
 На вашем локальном компьютере:
 ```bash
 rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-  /Users/sergejsaburkin/PythonProject/HH.ru/ selectel:/opt/hh-bot/
+  /path/to/project/HH.ru/ your-server:/opt/hh-bot/
 # или если используете прямой доступ:
 # rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-#   /Users/sergejsaburkin/PythonProject/HH.ru/ root@84.38.181.117:/opt/hh-bot/
+#   /path/to/project/HH.ru/ root@your-server-ip:/opt/hh-bot/
 ```
 
 ### 3. Настройка виртуального окружения
@@ -408,10 +408,10 @@ apt install -y google-chrome-stable
 # 1. Загрузка обновленного кода на сервер (с локального компьютера)
 # На вашем локальном компьютере:
 rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-  /Users/sergejsaburkin/PythonProject/HH.ru/ selectel:/opt/hh-bot/
+  /path/to/project/HH.ru/ your-server:/opt/hh-bot/
 
 # 2. На сервере: обновление зависимостей (если нужно)
-ssh selectel
+ssh your-server
 cd /opt/hh-bot
 source venv/bin/activate
 pip install -r requirements.txt --upgrade
@@ -442,7 +442,7 @@ tar -czf hh-bot-backup-$(date +%Y%m%d).tar.gz /opt/hh-bot
 
 ### Текущая конфигурация
 
-- **Сервер**: Selectel VDS (Ubuntu 22.04)
+- **Сервер**: VDS сервер (Ubuntu 22.04)
 - **Браузер**: Chromium (snap версия)
 - **Интервал запуска**: Каждые 5 часов
 - **Расположение**: `/opt/hh-bot`
@@ -471,6 +471,6 @@ tail -n 50 /opt/hh-bot/logs/scheduler_*.log
 ### Обновление проекта
 
 1. Обновите код локально
-2. Загрузите на сервер: `rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' /path/to/HH.ru/ selectel:/opt/hh-bot/`
+2. Загрузите на сервер: `rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' /path/to/project/HH.ru/ your-server:/opt/hh-bot/`
 3. Перезапустите сервис: `systemctl restart hh-bot.service`
 

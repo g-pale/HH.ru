@@ -157,10 +157,10 @@ systemctl disable hh-bot.service
 ```bash
 # 1. На локальном компьютере: загрузка обновленного кода на сервер
 rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-  /path/to/HH.ru/ selectel:/opt/hh-bot/
+  /path/to/project/HH.ru/ your-server:/opt/hh-bot/
 
 # 2. На сервере: перезапуск сервиса
-ssh selectel
+ssh your-server
 systemctl restart hh-bot.service
 systemctl status hh-bot.service
 ```
@@ -258,4 +258,4 @@ systemctl status hh-bot.service
 
 ---
 
-**Статус проекта**: ✅ Работает и протестирован на сервере Selectel (Ubuntu 22.04)
+**Статус проекта**: ✅ Работает и протестирован на VDS сервере (Ubuntu 22.04)

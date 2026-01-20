@@ -6,7 +6,7 @@
 
 - Дата завершения: 2025-12-09
 - Статус: Production Ready
-- Сервер: Selectel VDS (Ubuntu 22.04)
+- Сервер: VDS сервер (Ubuntu 22.04)
 - Браузер: Chromium 143.0.7499.40 (snap)
 
 ## 🎯 Что реализовано
@@ -108,7 +108,7 @@ systemctl disable hh-bot.service
 ```bash
 # На локальном компьютере
 rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-  /path/to/HH.ru/ selectel:/opt/hh-bot/
+  /path/to/project/HH.ru/ your-server:/opt/hh-bot/
 
 # На сервере
 systemctl restart hh-bot.service

@@ -54,7 +54,7 @@ git status | grep .env
 
 2. **Добавьте файлы в git**
    ```bash
-   cd /Users/sergejsaburkin/PythonProject/HH.ru
+   cd /path/to/project/HH.ru
    
    # Добавление всех файлов (кроме тех, что в .gitignore)
    git add .
@@ -75,7 +75,7 @@ git status | grep .env
 ### Вариант 2: Если репозиторий уже создан
 
 ```bash
-cd /Users/sergejsaburkin/PythonProject/HH.ru
+cd /path/to/project/HH.ru
 
 # Добавление файлов
 git add .
@@ -134,13 +134,13 @@ systemctl restart hh-bot.service
 ```bash
 # На локальном компьютере
 rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-  /Users/sergejsaburkin/PythonProject/HH.ru/ selectel:/opt/hh-bot/
+  /path/to/project/HH.ru/ your-server:/opt/hh-bot/
 ```
 
 ## 🎯 Итоговая команда для загрузки
 
 ```bash
-cd /Users/sergejsaburkin/PythonProject/HH.ru
+cd /path/to/project/HH.ru
 
 # Проверка статуса
 git status
