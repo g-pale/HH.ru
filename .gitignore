@@ -39,6 +39,7 @@ ENV/
 # Logs
 *.log
 logs/
+logs/last_resume_index.json
 
 # OS
 .DS_Store

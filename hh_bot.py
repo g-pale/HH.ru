@@ -24,6 +24,7 @@ class HHResumeBot:
         self.config = Config
         self.session = requests.Session()
         self.driver = None
+        self._is_logged_in = False  # Флаг авторизации для избежания повторных входов
         
     def __enter__(self):
         return self
@@ -37,14 +38,24 @@ class HHResumeBot:
             self.driver.quit()
         self.session.close()
     
-    def update_resume_via_api(self) -> bool:
+    def update_resume_via_api(self, resume_id: str = None) -> bool:
         """
         Попытка поднять резюме через официальный API hh.ru
         ВАЖНО: Нужно проверить документацию API на наличие этого метода
+        
+        Args:
+            resume_id: ID резюме для поднятия. Если не указан, используется первый из списка.
         """
         if not self.config.HH_ACCESS_TOKEN:
             logger.warning("OAuth токен не указан, пропускаем метод API")
             return False
+        
+        if not resume_id:
+            resume_ids = self.config.get_resume_ids()
+            if not resume_ids:
+                logger.error("Не указан ID резюме")
+                return False
+            resume_id = resume_ids[0]
             
         headers = {
             'Authorization': f'Bearer {self.config.HH_ACCESS_TOKEN}',
@@ -57,13 +68,13 @@ class HHResumeBot:
         # - POST /resumes/{resume_id}/update
         # - PUT /resumes/{resume_id}/publish_to_search
         
-        api_url = f"{self.config.HH_API_BASE_URL}/resumes/{self.config.RESUME_ID}/publish"
+        api_url = f"{self.config.HH_API_BASE_URL}/resumes/{resume_id}/publish"
         
         try:
             response = self.session.put(api_url, headers=headers)
             
             if response.status_code == 200 or response.status_code == 204:
-                logger.success(f"Резюме {self.config.RESUME_ID} успешно поднято через API")
+                logger.success(f"Резюме {resume_id} успешно поднято через API")
                 return True
             else:
                 logger.warning(f"API вернул код {response.status_code}: {response.text}")
@@ -226,8 +237,36 @@ class HHResumeBot:
                 continue
         return None
     
+    def _check_logged_in(self) -> bool:
+        """Проверка, авторизован ли пользователь"""
+        if not self.driver:
+            return False
+        
+        try:
+            current_url = self.driver.current_url
+            # Если не на странице входа, возможно уже авторизован
+            if 'account/login' not in current_url:
+                # Проверяем наличие элементов личного кабинета
+                try:
+                    personal_elements = self.driver.find_elements(
+                        By.CSS_SELECTOR, 
+                        '[data-qa="mainmenu_applicantResumes"], [data-qa="mainmenu_myResumes"], [href*="/applicant/resumes"]'
+                    )
+                    if personal_elements:
+                        return True
+                except:
+                    pass
+        except:
+            pass
+        return False
+    
     def _login(self) -> bool:
         """Авторизация на hh.ru (многошаговый процесс)"""
+        # Если уже авторизован, пропускаем
+        if self._is_logged_in and self._check_logged_in():
+            logger.debug("Пользователь уже авторизован, пропускаем вход")
+            return True
+        
         try:
             logger.info("Начинаем авторизацию на hh.ru...")
             self.driver.get(self.config.HH_LOGIN_URL)
@@ -658,6 +697,7 @@ class HHResumeBot:
                 if 'account/login' not in current_url:
                     logger.success("Авторизация успешна (по URL)")
                     logger.debug(f"Текущий URL после авторизации: {current_url}")
+                    self._is_logged_in = True
                     return True
                 
                 # Способ 2: Проверка наличия элементов личного кабинета
@@ -670,6 +710,7 @@ class HHResumeBot:
                     if personal_elements:
                         logger.success("Авторизация успешна (найдены элементы личного кабинета)")
                         logger.debug(f"Текущий URL: {current_url}")
+                        self._is_logged_in = True
                         return True
                 except:
                     pass
@@ -728,7 +769,7 @@ class HHResumeBot:
                 pass
             return False
     
-    def update_resume_via_web(self) -> bool:
+    def update_resume_via_web(self, resume_id: str = None) -> bool:
         """
         Поднятие резюме через веб-автоматизацию (Selenium)
         Имитирует действия пользователя в браузере
@@ -740,8 +781,16 @@ class HHResumeBot:
             if not self._login():
                 return False
             
+            # Определяем ID резюме для поднятия
+            if not resume_id:
+                resume_ids = self.config.get_resume_ids()
+                if not resume_ids:
+                    logger.error("Не указан ID резюме")
+                    return False
+                resume_id = resume_ids[0]
+            
             # Переход на страницу резюме
-            resume_url = f"{self.config.HH_BASE_URL}/resume/{self.config.RESUME_ID}"
+            resume_url = f"{self.config.HH_BASE_URL}/resume/{resume_id}"
             logger.info(f"Переходим на страницу резюме: {resume_url}")
             self.driver.get(resume_url)
             time.sleep(3)
@@ -872,7 +921,7 @@ class HHResumeBot:
                     logger.debug("Обычный клик не сработал, пробуем через JavaScript...")
                     self.driver.execute_script("arguments[0].click();", update_button)
                 
-                logger.success(f"Резюме {self.config.RESUME_ID} успешно поднято через веб-интерфейс")
+                logger.success(f"Резюме {resume_id} успешно поднято через веб-интерфейс")
                 
                 # Ждем подтверждения действия
                 time.sleep(3)
@@ -955,22 +1004,33 @@ class HHResumeBot:
                 pass
             return False
     
-    def update_resume(self) -> bool:
+    def update_resume(self, resume_id: str = None) -> bool:
         """
         Основной метод для поднятия резюме
         Пытается использовать API, если не получается - использует веб-автоматизацию
+        
+        Args:
+            resume_id: ID резюме для поднятия. Если не указан, используется первый из списка.
         """
-        logger.info(f"Начинаем поднятие резюме {self.config.RESUME_ID}...")
+        # Определяем ID резюме для поднятия
+        if not resume_id:
+            resume_ids = self.config.get_resume_ids()
+            if not resume_ids:
+                logger.error("Не указаны ID резюме")
+                return False
+            resume_id = resume_ids[0]
+        
+        logger.info(f"Начинаем поднятие резюме {resume_id}...")
         
         # Сначала пробуем через API
         if self.config.HH_ACCESS_TOKEN:
-            if self.update_resume_via_api():
+            if self.update_resume_via_api(resume_id):
                 return True
             logger.info("API метод не сработал, пробуем через веб-автоматизацию...")
         
         # Если API не доступен или не сработал, используем веб-автоматизацию
         if self.config.HH_LOGIN and self.config.HH_PASSWORD:
-            return self.update_resume_via_web()
+            return self.update_resume_via_web(resume_id)
         
         logger.error("Нет доступных методов для поднятия резюме")
         return False

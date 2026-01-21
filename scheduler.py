@@ -1,6 +1,7 @@
 """
 Планировщик для автоматического запуска бота
 Резюме можно поднимать раз в 4 часа, поэтому можно настроить запуск каждые 4 часа
+Поддерживает поднятие всех резюме за один запуск (одна авторизация для всех резюме)
 """
 import schedule
 import time
@@ -10,20 +11,60 @@ from config import Config
 
 
 def run_bot():
-    """Запуск бота для поднятия резюме"""
+    """
+    Запуск бота для поднятия всех резюме за один раз
+    Бот авторизуется один раз и поднимает все резюме подряд
+    """
     logger.info("=" * 50)
     logger.info("Запуск запланированного поднятия резюме")
     logger.info("=" * 50)
     
+    resume_ids = Config.get_resume_ids()
+    if not resume_ids:
+        logger.error("Не указаны ID резюме в конфигурации")
+        return
+    
+    logger.info(f"Найдено резюме для поднятия: {len(resume_ids)}")
+    logger.info("Бот авторизуется один раз и поднимет все резюме подряд")
+    
+    success_count = 0
+    fail_count = 0
+    
     try:
+        # Создаем один экземпляр бота (одна авторизация)
         with HHResumeBot() as bot:
-            success = bot.update_resume()
-            if success:
-                logger.success("Резюме успешно поднято по расписанию!")
-            else:
-                logger.error("Не удалось поднять резюме по расписанию")
+            # Проходим по всем резюме и поднимаем их подряд
+            for index, resume_id in enumerate(resume_ids, 1):
+                logger.info("-" * 50)
+                logger.info(f"Поднимаем резюме #{index} из {len(resume_ids)}: {resume_id}")
+                
+                try:
+                    success = bot.update_resume(resume_id)
+                    if success:
+                        logger.success(f"✓ Резюме #{index} ({resume_id}) успешно поднято!")
+                        success_count += 1
+                    else:
+                        logger.warning(f"✗ Не удалось поднять резюме #{index} ({resume_id})")
+                        fail_count += 1
+                except Exception as e:
+                    logger.error(f"✗ Ошибка при поднятии резюме #{index} ({resume_id}): {e}")
+                    fail_count += 1
+                
+                # Небольшая задержка между поднятиями (2 секунды)
+                # Чтобы не было слишком быстро и не вызвать подозрений
+                if index < len(resume_ids):
+                    logger.debug(f"Ожидание 2 секунды перед следующим резюме...")
+                    time.sleep(2)
+            
+            logger.info("=" * 50)
+            logger.info(f"Итоги поднятия резюме:")
+            logger.info(f"  Успешно: {success_count} из {len(resume_ids)}")
+            logger.info(f"  Ошибок: {fail_count} из {len(resume_ids)}")
+            logger.info("=" * 50)
+            
     except Exception as e:
         logger.error(f"Критическая ошибка при выполнении задачи: {e}")
+        logger.exception("Детали ошибки:")
 
 
 def main():

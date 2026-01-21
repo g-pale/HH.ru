@@ -176,7 +176,13 @@ nano .env  # или используйте vi
 ```env
 HH_LOGIN=your_email@example.com
 HH_PASSWORD=your_password
+
+# Вариант 1: Одно резюме
 RESUME_ID=your_resume_id
+
+# Вариант 2: Несколько резюме (будут подниматься поочередно)
+# RESUME_IDS=resume_id_1,resume_id_2,resume_id_3
+
 SCHEDULE_TIME=09:00
 HEADLESS_BROWSER=true
 BROWSER_TYPE=chrome
@@ -291,6 +297,13 @@ python scheduler.py
 
 ```bash
 # Логи планировщика
+# Последний файл лога
+ls -lt /opt/hh-bot/logs/scheduler_*.log | head -1
+
+# Просмотр последних строк
+tail -n 50 /opt/hh-bot/logs/scheduler_*.log
+
+# Просмотр в реальном времени
 tail -f /opt/hh-bot/logs/scheduler_*.log
 
 # Логи бота
@@ -465,6 +478,10 @@ systemctl status hh-bot.service
 journalctl -u hh-bot.service -n 50
 
 # Логи планировщика
+# Последний файл лога
+ls -lt /opt/hh-bot/logs/scheduler_*.log | head -1
+
+# Просмотр последних строк
 tail -n 50 /opt/hh-bot/logs/scheduler_*.log
 ```
 
