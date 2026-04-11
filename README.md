@@ -172,7 +172,7 @@ systemctl disable hh-bot.service
 
 ```bash
 # 1. На локальном компьютере: загрузка обновленного кода на сервер
-rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
+rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
   /path/to/project/HH.ru/ your-server:/opt/hh-bot/
 
 # 2. На сервере: перезапуск сервиса
@@ -231,11 +231,23 @@ systemctl status hh-bot.service
 3. Проверьте скриншоты ошибок в `logs/`
 4. Проверьте, не появилась ли капча
 
-### Chromium/Chrome не запускается
+### Chromium/Chrome не запускается или падает с ReadTimeoutError
 
-1. Убедитесь, что браузер установлен: `chromium-browser --version`
-2. Проверьте, что установлены все зависимости (см. DEPLOY.md)
-3. Увеличьте swap, если не хватает памяти: `free -h`
+1. Убейте зомби-процессы: `pkill -9 -f chromium && pkill -9 -f chromedriver`
+2. Проверьте память: `free -h`
+3. Убедитесь, что браузер установлен: `chromium-browser --version`
+4. Увеличьте swap, если не хватает памяти (см. DEPLOY.md)
+5. В `.env` задайте `SELENIUM_HTTP_READ_TIMEOUT=300` и перезапустите сервис (в коде по умолчанию 240 с вместо 120)
+6. Если зависания сохраняются на слабом VDS: `BROWSER_RESTART_EACH_RESUME=true` (каждое резюме — новый браузер и повторный вход)
+7. Не включайте `CHROMIUM_SINGLE_PROCESS=true` без крайней необходимости — режим часто даёт зависания
+
+### `TimeoutException: Timed out receiving message from renderer`
+
+Типично для слабого VDS: Chromium не успевает отрисовать страницу. В коде увеличены таймаут навигации (как `SELENIUM_HTTP_READ_TIMEOUT`), повтор `get` и флаги `--renderer-process-limit` / `site-per-process` в headless. При повторе сбоя: поднять `SELENIUM_HTTP_READ_TIMEOUT` до `360`, при нехватке RAM попробовать `CHROMIUM_SINGLE_PROCESS=true` или перезагрузить сервер после обновлений ядра.
+
+### SessionNotCreatedException: ChromeDriver only supports Chrome version X, browser is Y
+
+Версия браузера и драйвера не совпадают (часто после автообновления Chromium). Обновите код — бот сам подбирает ChromeDriver под текущую версию. Если ошибка остаётся, на сервере выполните: `rm -rf /root/.wdm/ /opt/hh-bot/.wdm/ ~/.cache/selenium/` и `systemctl restart hh-bot.service`. Подробнее в DEPLOY.md.
 
 ### Селекторы не работают
 
@@ -250,9 +262,29 @@ systemctl status hh-bot.service
 
 При обновлении кода:
 
-1. Обновите код на сервере (через rsync или git)
-2. Перезапустите сервис: `systemctl restart hh-bot.service`
-3. Проверьте логи: `journalctl -u hh-bot.service -f`
+0. **Бэкап на сервере** (перед rsync), чтобы можно было откатиться:
+   ```bash
+   ssh your-server 'mkdir -p /root/hh-bot-backups && tar -czf /root/hh-bot-backups/hh-bot-$(date +%Y%m%d_%H%M).tar.gz -C /opt hh-bot'
+   ```
+
+1. Загрузите код на сервер (с локального компьютера):
+   ```bash
+   cd /path/to/project/HH.ru
+   rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+     . your-server:/opt/hh-bot/
+   ```
+
+2. На сервере — очистите процессы и перезапустите:
+   ```bash
+   pkill -9 -f chromium; pkill -9 -f chromedriver
+   systemctl restart hh-bot.service
+   systemctl status hh-bot.service
+   ```
+
+3. Проверьте логи:
+   ```bash
+   tail -n 50 /opt/hh-bot/logs/scheduler_*.log
+   ```
 
 ## 📄 Лицензия
 

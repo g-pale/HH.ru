@@ -106,12 +106,15 @@ systemctl disable hh-bot.service
 
 ### Обновление кода
 ```bash
-# На локальном компьютере
-rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-  /path/to/project/HH.ru/ your-server:/opt/hh-bot/
+# На локальном компьютере (исключаем .env чтобы не перезаписать серверный)
+cd /path/to/project/HH.ru
+rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+  . your-server:/opt/hh-bot/
 
-# На сервере
+# На сервере — очистить процессы и перезапустить
+pkill -9 -f chromium; pkill -9 -f chromedriver
 systemctl restart hh-bot.service
+systemctl status hh-bot.service
 ```
 
 ## ⚠️ Важные моменты
@@ -119,7 +122,10 @@ systemctl restart hh-bot.service
 ### О поднятии резюме
 - Резюме можно поднимать **раз в 4 часа**
 - Бот настроен на запуск каждые 5 часов (с запасом)
+- Бот поднимает **все резюме за один запуск** (одна авторизация)
 - Бот корректно определяет, когда резюме уже поднято
+- При ошибке выполняется повторная попытка (до 2 раз на каждое резюме)
+- Зомби-процессы браузера автоматически убиваются перед и после запуска
 
 ### О капче
 - При частых попытках входа может появиться капча

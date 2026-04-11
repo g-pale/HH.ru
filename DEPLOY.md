@@ -146,9 +146,9 @@ scp -r /path/to/project/HH.ru/* your-server:/opt/hh-bot/
 ```
 
 **Вариант В: Через rsync (рекомендуется)**
-На вашем локальном компьютере:
+На вашем локальном компьютере (из каталога проекта или с полным путём; **не пишите отдельно `ssh`** — rsync сам вызовет SSH для `your-server` из `~/.ssh/config`):
 ```bash
-rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
+rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
   /path/to/project/HH.ru/ your-server:/opt/hh-bot/
 # или если используете прямой доступ:
 # rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
@@ -325,6 +325,27 @@ htop
 
 ## Возможные проблемы и решения
 
+### Проблема: Chromium/Chrome падает с ReadTimeoutError
+
+Основная причина — зомби-процессы Chromium забивают память на сервере.
+
+**Решение:**
+
+```bash
+# Убить все зависшие процессы браузера
+pkill -9 -f chromium
+pkill -9 -f chrome
+pkill -9 -f chromedriver
+
+# Проверить память
+free -h
+
+# Перезапустить сервис
+systemctl restart hh-bot.service
+```
+
+Бот автоматически убивает зомби-процессы перед и после каждого запуска, но при крашах процессы могут остаться.
+
 ### Проблема: Chrome не запускается в headless режиме
 
 **Решение**: Убедитесь, что установлены все зависимости и Chrome запускается с правильными флагами. В коде уже настроен headless режим.
@@ -366,7 +387,21 @@ chromium-browser --version
 
 Затем в коде нужно будет изменить `BROWSER_TYPE=chromium` в `.env` файле.
 
-**Решение 3: Очистка кэша и повторная установка**
+**Решение 3: Ошибка «ChromeDriver only supports Chrome version X», браузер версии Y (SessionNotCreatedException)**
+
+После автообновления Chromium (например snap) версия браузера может стать новее, чем версия закэшированного ChromeDriver. Бот с версии 1.2+ сам запрашивает драйвер под текущую версию браузера; если ошибка остаётся:
+
+1. Очистите кэш webdriver-manager и перезапустите сервис:
+   ```bash
+   rm -rf /root/.wdm/
+   rm -rf /opt/hh-bot/.wdm/
+   rm -rf ~/.cache/selenium/
+   systemctl restart hh-bot.service
+   ```
+2. Проверьте версии: `chromium-browser --version` и при следующем запуске бот скачает подходящий ChromeDriver.
+3. При необходимости обновите код проекта (в нём передаётся версия браузера в ChromeDriverManager).
+
+**Решение 4: Очистка кэша apt и повторная установка**
 
 ```bash
 # Очистка кэша apt
@@ -377,6 +412,17 @@ rm -rf /var/cache/apt/archives/*
 apt update
 apt install -y google-chrome-stable
 ```
+
+### Проблема: SessionNotCreatedException — ChromeDriver supports Chrome X, browser is Y
+
+Chromium (snap/apt) мог обновиться, а ChromeDriver в кэше остался старым. Сделайте:
+
+```bash
+rm -rf /root/.wdm/ /opt/hh-bot/.wdm/ ~/.cache/selenium/
+systemctl restart hh-bot.service
+```
+
+После обновления кода бот сам запрашивает ChromeDriver под версию установленного браузера.
 
 ### Проблема: Селекторы не работают
 
@@ -415,41 +461,54 @@ apt install -y google-chrome-stable
 
 ## Обновление проекта
 
-При обновлении кода:
+При обновлении кода **сначала сделайте резервную копию на сервере** (чтобы можно было откатиться), затем заливайте файлы.
 
 ```bash
-# 1. Загрузка обновленного кода на сервер (с локального компьютера)
-# На вашем локальном компьютере:
-rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
-  /path/to/project/HH.ru/ your-server:/opt/hh-bot/
+# 0. На сервере: бэкап каталога бота (архив лучше хранить ВНЕ /opt/hh-bot, чтобы rsync его не трогал)
+ssh your-server 'mkdir -p /root/hh-bot-backups && tar -czf /root/hh-bot-backups/hh-bot-$(date +%Y%m%d_%H%M).tar.gz -C /opt hh-bot'
 
-# 2. На сервере: обновление зависимостей (если нужно)
+# Если нужен меньший архив без venv (после отката: заново pip install -r requirements.txt в venv):
+# ssh your-server 'tar -czf /root/hh-bot-backups/hh-bot-$(date +%Y%m%d_%H%M)-no-venv.tar.gz -C /opt --exclude=hh-bot/venv hh-bot'
+
+# 1. Загрузка обновленного кода на сервер (с локального компьютера)
+# ВАЖНО: исключаем .env чтобы не перезаписать серверную конфигурацию
+cd /path/to/project/HH.ru
+rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' \
+  --exclude '*.md' --exclude '.ruff_cache' \
+  . your-server:/opt/hh-bot/
+
+# 2. На сервере: очистить зомби-процессы и перезапустить
 ssh your-server
+pkill -9 -f chromium; pkill -9 -f chromedriver
+
+# 3. Обновление зависимостей (если нужно)
 cd /opt/hh-bot
 source venv/bin/activate
 pip install -r requirements.txt --upgrade
 
-# 3. Перезапуск сервиса
+# 4. Перезапуск сервиса
 systemctl restart hh-bot.service
 
-# 4. Проверка статуса
+# 5. Проверка статуса
 systemctl status hh-bot.service
 
-# 5. Просмотр логов для проверки работы
-journalctl -u hh-bot.service -f
+# 6. Просмотр логов для проверки работы
+tail -n 50 /opt/hh-bot/logs/scheduler_*.log
 ```
+
+**Откат из бэкапа** (если что-то пошло не так): остановите сервис, распакуйте архив поверх `/opt` или замените каталог `hh-bot` содержимым из архива, снова `chmod 600 /opt/hh-bot/.env`, запустите сервис.
 
 ## Резервное копирование
 
-Рекомендуется регулярно делать бэкап:
-- Файл `.env` (с учетными данными)
-- Логи
-- Код проекта
+Рекомендуется **перед каждым обновлением кода** делать снимок (см. шаг 0 в разделе «Обновление проекта»). Дополнительно имеет смысл хранить копию `.env` отдельно (без выкладывания в git).
 
 ```bash
-# Создание бэкапа
-tar -czf hh-bot-backup-$(date +%Y%m%d).tar.gz /opt/hh-bot
+# Полный бэкап каталога проекта на сервере (в домашний каталог root или в /root/hh-bot-backups)
+mkdir -p /root/hh-bot-backups
+tar -czf /root/hh-bot-backups/hh-bot-$(date +%Y%m%d).tar.gz -C /opt hh-bot
 ```
+
+Старые архивы в `/opt/hh-bot/` (например `hh-bot-backup-*.tar.gz`) после следующих rsync не удаляются, пока нет `--delete`, но новые бэкапы удобнее складывать **снаружи** `/opt/hh-bot`, чтобы не смешивать с рабочими файлами.
 
 ## Итоговая информация
 
@@ -488,6 +547,6 @@ tail -n 50 /opt/hh-bot/logs/scheduler_*.log
 ### Обновление проекта
 
 1. Обновите код локально
-2. Загрузите на сервер: `rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' /path/to/project/HH.ru/ your-server:/opt/hh-bot/`
+2. Загрузите на сервер: `rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' /path/to/project/HH.ru/ your-server:/opt/hh-bot/`
 3. Перезапустите сервис: `systemctl restart hh-bot.service`
 

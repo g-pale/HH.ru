@@ -26,9 +26,10 @@ env/
 ENV/
 .venv
 
-# IDE
+# IDE / tools
 .idea/
 .vscode/
+.ruff_cache/
 *.swp
 *.swo
 *~
