@@ -4,8 +4,8 @@
 
 - **ОС**: Ubuntu 22.04 ✅
 - **Python**: 3.8+ (рекомендуется 3.10+)
-- **RAM**: минимум 512 МБ ✅
-- **Диск**: достаточно места для Python, Chrome и зависимостей (~500 МБ)
+- **RAM**: минимум 512 МБ + swap 2 ГБ; **рекомендуется 1 ГБ** для стабильной работы Chromium
+- **Диск**: от 20 ГБ (рекомендуется 30 ГБ)
 
 ## Подготовка сервера
 
@@ -72,7 +72,7 @@ apt install -y \
     xdg-utils
 ```
 
-### 4. Увеличение swap (ВАЖНО для серверов с 512 МБ RAM)
+### 4. Увеличение swap (ВАЖНО для серверов с 512 МБ RAM; при 1 ГБ RAM swap всё равно полезен)
 
 Chrome требует много памяти при установке. Рекомендуется сначала увеличить swap:
 
@@ -148,7 +148,10 @@ scp -r /path/to/project/HH.ru/* your-server:/opt/hh-bot/
 **Вариант В: Через rsync (рекомендуется)**
 На вашем локальном компьютере (из каталога проекта или с полным путём; **не пишите отдельно `ssh`** — rsync сам вызовет SSH для `your-server` из `~/.ssh/config`):
 ```bash
-rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+rsync -avz \
+  --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
+  --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+  --exclude '.git' --exclude '.DS_Store' --exclude 'logs/' \
   /path/to/project/HH.ru/ your-server:/opt/hh-bot/
 # или если используете прямой доступ:
 # rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
@@ -424,6 +427,57 @@ systemctl restart hh-bot.service
 
 После обновления кода бот сам запрашивает ChromeDriver под версию установленного браузера.
 
+### Проблема: InvalidSessionIdException (браузер закрыл соединение)
+
+Chromium упал или был убит — сессия Selenium стала недействительной. Частые причины: нехватка RAM, заполненный диск, зомби-процессы.
+
+**Решение (бот 1.3+):** код пересоздаёт браузер при мёртвой сессии и повторяет попытку. Если ошибки повторяются:
+
+```bash
+free -h
+df -h /
+pkill -9 -f chromium; pkill -9 -f chromedriver
+systemctl restart hh-bot.service
+```
+
+При заполненном диске — см. раздел ниже. Рекомендуется апгрейд до **1 ГБ RAM**.
+
+### Проблема: Диск заполнен (No space left on device)
+
+На VDS с Chromium (snap) `/tmp/snap-private-tmp` может разрастись до нескольких ГБ. Не синхронизируйте `.git` на сервер через rsync.
+
+**Диагностика:**
+
+```bash
+df -h /
+du -sh /* 2>/dev/null | sort -rh | head -10
+du -sh /tmp/* 2>/dev/null | sort -rh | head -5
+```
+
+**Очистка:**
+
+```bash
+# Временные файлы Chromium (snap)
+rm -rf /tmp/snap-private-tmp/*
+
+# Старые ревизии snap
+snap set system refresh.retain=2
+snap list --all | awk '/disabled/{system("snap remove " $1 " --revision=" $3)}'
+
+# Журналы и кеш apt
+journalctl --vacuum-size=50M
+apt-get clean
+
+# Лишнее в каталоге бота (на сервере .git не нужен)
+rm -rf /opt/hh-bot/.git /opt/hh-bot/__pycache__
+find /opt/hh-bot/logs -name "*.log" -mtime +7 -delete
+find /opt/hh-bot/logs -name "*.png" -mtime +7 -delete
+
+df -h /
+```
+
+Если `apt-get clean` пишет про lock — проверьте зависший процесс: `ps aux | grep apt` и завершите его (`kill`), затем повторите.
+
 ### Проблема: Селекторы не работают
 
 **Решение**: Интерфейс hh.ru мог измениться. Проверьте логи и обновите селекторы в коде.
@@ -475,6 +529,7 @@ ssh your-server 'mkdir -p /root/hh-bot-backups && tar -czf /root/hh-bot-backups/
 cd /path/to/project/HH.ru
 rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' \
   --exclude '*.md' --exclude '.ruff_cache' \
+  --exclude '.git' --exclude '.DS_Store' --exclude 'logs/' \
   . your-server:/opt/hh-bot/
 
 # 2. На сервере: очистить зомби-процессы и перезапустить
@@ -547,6 +602,13 @@ tail -n 50 /opt/hh-bot/logs/scheduler_*.log
 ### Обновление проекта
 
 1. Обновите код локально
-2. Загрузите на сервер: `rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' /path/to/project/HH.ru/ your-server:/opt/hh-bot/`
+2. Загрузите на сервер:
+   ```bash
+   rsync -avz \
+     --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
+     --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+     --exclude '.git' --exclude '.DS_Store' --exclude 'logs/' \
+     /path/to/project/HH.ru/ your-server:/opt/hh-bot/
+   ```
 3. Перезапустите сервис: `systemctl restart hh-bot.service`
 

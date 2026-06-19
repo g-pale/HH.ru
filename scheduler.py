@@ -8,6 +8,7 @@ import subprocess
 import schedule
 import time
 from loguru import logger
+from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
 from hh_bot import HHResumeBot
 from config import Config
 
@@ -58,13 +59,24 @@ def run_bot_for_resume(bot, index, resume_id, total):
             else:
                 logger.warning(f"Не удалось поднять резюме #{index} ({resume_id})")
                 if attempt < MAX_RETRIES:
-                    logger.info("Повторная попытка через 5 секунд...")
-                    time.sleep(5)
+                    logger.info("Повторная попытка через 10 секунд...")
+                    bot.restart_webdriver()
+                    kill_zombie_browsers()
+                    time.sleep(10)
+        except (InvalidSessionIdException, WebDriverException) as e:
+            logger.error(
+                f"Браузер упал при поднятии резюме #{index} ({resume_id}): {e}"
+            )
+            bot.restart_webdriver()
+            kill_zombie_browsers()
+            if attempt < MAX_RETRIES:
+                logger.info("Пересоздаём браузер, повторная попытка через 10 секунд...")
+                time.sleep(10)
         except Exception as e:
             logger.error(f"Ошибка при поднятии резюме #{index} ({resume_id}): {e}")
             if attempt < MAX_RETRIES:
-                logger.info("Повторная попытка через 5 секунд...")
-                time.sleep(5)
+                logger.info("Повторная попытка через 10 секунд...")
+                time.sleep(10)
     return False
 
 

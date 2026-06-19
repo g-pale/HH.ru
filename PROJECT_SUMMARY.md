@@ -108,7 +108,10 @@ systemctl disable hh-bot.service
 ```bash
 # На локальном компьютере (исключаем .env чтобы не перезаписать серверный)
 cd /path/to/project/HH.ru
-rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+rsync -avz \
+  --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
+  --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+  --exclude '.git' --exclude '.DS_Store' --exclude 'logs/' \
   . your-server:/opt/hh-bot/
 
 # На сервере — очистить процессы и перезапустить
@@ -142,7 +145,7 @@ systemctl status hh-bot.service
 ### Требования
 - Ubuntu 22.04+
 - Python 3.8+
-- 512 МБ RAM (рекомендуется с swap 2 ГБ)
+- 512 МБ RAM + swap 2 ГБ (минимум); **рекомендуется 1 ГБ RAM**, диск от 20 ГБ (лучше 30 ГБ)
 - Chromium или Chrome
 
 ### Быстрый старт

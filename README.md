@@ -10,7 +10,7 @@
 
 - ✅ Автоматическая авторизация на hh.ru
 - ✅ Поднятие резюме в поиске
-- ✅ Поддержка нескольких резюме с поочередным поднятием (round-robin)
+- ✅ Поддержка нескольких резюме — все поднимаются за один запуск (одна авторизация)
 - ✅ Определение, когда резюме уже поднято
 - ✅ Обработка капчи (с предупреждениями)
 - ✅ Работа на сервере без графического интерфейса (headless режим)
@@ -22,7 +22,8 @@
 - Python 3.8+ (рекомендуется 3.10+)
 - Chromium или Google Chrome
 - Ubuntu 22.04+ (для развертывания на сервере)
-- Минимум 512 МБ RAM (рекомендуется с swap 2 ГБ)
+- Минимум 512 МБ RAM + swap 2 ГБ; **рекомендуется 1 ГБ RAM** для стабильной работы Chromium
+- Диск: от 20 ГБ (рекомендуется 30 ГБ — Chromium/snap и логи быстро заполняют диск)
 
 ## 🚀 Быстрый старт
 
@@ -120,13 +121,9 @@ BROWSER_TYPE=chromium      # chromium или chrome
 
 ### Поддержка нескольких резюме
 
-Бот поддерживает поочередное поднятие нескольких резюме. При каждом запуске бот автоматически поднимает следующее резюме по кругу (round-robin). Это позволяет равномерно распределять поднятия между всеми резюме.
+Бот поднимает **все** указанные резюме за один запуск по расписанию: одна авторизация, затем переход по каждому резюме подряд.
 
-**Пример:** Если у вас 3 резюме, то:
-- 1-й запуск → поднимается 1-е резюме
-- 2-й запуск → поднимается 2-е резюме  
-- 3-й запуск → поднимается 3-е резюме
-- 4-й запуск → снова 1-е резюме (и так по кругу)
+**Пример:** Если указаны 3 резюме, за один запуск поднимутся все три (обычно за 2–3 минуты каждое).
 
 ## 🔧 Управление на сервере
 
@@ -172,7 +169,10 @@ systemctl disable hh-bot.service
 
 ```bash
 # 1. На локальном компьютере: загрузка обновленного кода на сервер
-rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+rsync -avz \
+  --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
+  --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+  --exclude '.git' --exclude '.DS_Store' --exclude 'logs/' \
   /path/to/project/HH.ru/ your-server:/opt/hh-bot/
 
 # 2. На сервере: перезапуск сервиса
@@ -245,6 +245,21 @@ systemctl status hh-bot.service
 
 Типично для слабого VDS: Chromium не успевает отрисовать страницу. В коде увеличены таймаут навигации (как `SELENIUM_HTTP_READ_TIMEOUT`), повтор `get` и флаги `--renderer-process-limit` / `site-per-process` в headless. При повторе сбоя: поднять `SELENIUM_HTTP_READ_TIMEOUT` до `360`, при нехватке RAM попробовать `CHROMIUM_SINGLE_PROCESS=true` или перезагрузить сервер после обновлений ядра.
 
+### InvalidSessionIdException: session deleted as the browser has closed
+
+Chromium упал или был убит (часто из‑за нехватки RAM или заполненного диска). Бот с версии 1.3+ пересоздаёт браузер при мёртвой сессии и повторяет попытку.
+
+**Что проверить на сервере:**
+
+```bash
+free -h
+df -h /
+pkill -9 -f chromium; pkill -9 -f chromedriver
+systemctl restart hh-bot.service
+```
+
+Если диск заполнен — см. раздел «Диск заполнен» в [DEPLOY.md](DEPLOY.md). Рекомендуется **1 ГБ RAM** и периодическая очистка `/tmp/snap-private-tmp`.
+
 ### SessionNotCreatedException: ChromeDriver only supports Chrome version X, browser is Y
 
 Версия браузера и драйвера не совпадают (часто после автообновления Chromium). Обновите код — бот сам подбирает ChromeDriver под текущую версию. Если ошибка остаётся, на сервере выполните: `rm -rf /root/.wdm/ /opt/hh-bot/.wdm/ ~/.cache/selenium/` и `systemctl restart hh-bot.service`. Подробнее в DEPLOY.md.
@@ -270,7 +285,10 @@ systemctl status hh-bot.service
 1. Загрузите код на сервер (с локального компьютера):
    ```bash
    cd /path/to/project/HH.ru
-   rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+   rsync -avz \
+     --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' \
+     --exclude '.env' --exclude '*.md' --exclude '.ruff_cache' \
+     --exclude '.git' --exclude '.DS_Store' --exclude 'logs/' \
      . your-server:/opt/hh-bot/
    ```
 

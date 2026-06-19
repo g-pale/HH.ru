@@ -19,7 +19,11 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import (
+    InvalidSessionIdException,
+    TimeoutException,
+    WebDriverException,
+)
 from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.chrome import ChromeDriverManager
 
@@ -192,10 +196,23 @@ class HHResumeBot:
             logger.error(f"Ошибка при работе с API: {e}")
             return False
 
+    def _is_session_alive(self) -> bool:
+        """Проверка, жива ли текущая сессия браузера."""
+        if not self.driver:
+            return False
+        try:
+            _ = self.driver.title
+            return True
+        except (InvalidSessionIdException, WebDriverException):
+            return False
+
     def _init_browser(self):
         """Инициализация браузера для веб-автоматизации"""
         if self.driver:
-            return
+            if self._is_session_alive():
+                return
+            logger.warning("Обнаружена мёртвая сессия браузера, пересоздаём...")
+            self.restart_webdriver()
 
         try:
             http_timeout_sec = max(60, int(self.config.SELENIUM_HTTP_READ_TIMEOUT))
@@ -977,13 +994,22 @@ class HHResumeBot:
 
             return False
 
+        except InvalidSessionIdException as e:
+            logger.error(f"Сессия браузера умерла при авторизации: {e}")
+            self.restart_webdriver()
+            self._kill_zombie_browsers()
+            return False
+
         except Exception as e:
             logger.error(f"Ошибка при авторизации: {e}")
             logger.exception("Детали ошибки:")
-            # Сохраняем скриншот для отладки
+            if isinstance(e, (InvalidSessionIdException, WebDriverException)):
+                self.restart_webdriver()
+                self._kill_zombie_browsers()
             try:
-                self.driver.save_screenshot("logs/login_error.png")
-                logger.info("Скриншот сохранен в logs/login_error.png")
+                if self.driver and self._is_session_alive():
+                    self.driver.save_screenshot("logs/login_error.png")
+                    logger.info("Скриншот сохранен в logs/login_error.png")
             except Exception:
                 pass
             return False
@@ -1243,12 +1269,20 @@ class HHResumeBot:
                 logger.warning("  3. Резюме не активно или находится в архиве")
                 return False
 
+        except InvalidSessionIdException as e:
+            logger.error(f"Сессия браузера умерла при поднятии резюме: {e}")
+            self.restart_webdriver()
+            self._kill_zombie_browsers()
+            return False
+
         except Exception as e:
             logger.error(f"Ошибка при поднятии резюме через веб: {e}")
             logger.exception("Детали ошибки:")
-            # Сохраняем скриншот для отладки
+            if isinstance(e, WebDriverException) and not self._is_session_alive():
+                self.restart_webdriver()
+                self._kill_zombie_browsers()
             try:
-                if self.driver:
+                if self.driver and self._is_session_alive():
                     self.driver.save_screenshot("logs/resume_update_error.png")
                     logger.info("Скриншот сохранен в logs/resume_update_error.png")
             except Exception:
