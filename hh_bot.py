@@ -27,6 +27,7 @@ from selenium.common.exceptions import (
 from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.chrome import ChromeDriverManager
 
+from browser_cleanup import kill_zombie_browsers
 from config import Config
 
 
@@ -136,17 +137,13 @@ class HHResumeBot:
 
     @staticmethod
     def _kill_zombie_browsers():
-        """Убийство зависших процессов Chromium/Chrome"""
-        import subprocess
-
-        try:
-            subprocess.run(["pkill", "-f", "chromium"], capture_output=True, timeout=5)
-            subprocess.run(["pkill", "-f", "chrome"], capture_output=True, timeout=5)
-            subprocess.run(
-                ["pkill", "-f", "chromedriver"], capture_output=True, timeout=5
-            )
-        except Exception:
-            pass
+        """
+        Убийство зависших процессов Chromium/Chrome (мягко: сначала SIGTERM,
+        SIGKILL — крайняя мера) и уборка их временных профилей в /tmp.
+        Без этого резкий SIGKILL оставляет каталоги профилей навсегда —
+        подробности в browser_cleanup.py.
+        """
+        kill_zombie_browsers()
 
     def update_resume_via_api(self, resume_id: str = None) -> bool:
         """

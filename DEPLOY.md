@@ -335,11 +335,6 @@ htop
 **Решение:**
 
 ```bash
-# Убить все зависшие процессы браузера
-pkill -9 -f chromium
-pkill -9 -f chrome
-pkill -9 -f chromedriver
-
 # Проверить память
 free -h
 
@@ -347,7 +342,11 @@ free -h
 systemctl restart hh-bot.service
 ```
 
-Бот автоматически убивает зомби-процессы перед и после каждого запуска, но при крашах процессы могут остаться.
+Бот с версии 1.4+ автоматически завершает зомби-процессы перед и после каждого запуска — мягко (SIGTERM, затем SIGKILL только если процесс не ответил). Ручной `pkill -9` не нужен и на практике вреден: резкий SIGKILL не даёт Chromium убрать свой временный профиль, из-за чего диск постепенно заполняется (см. раздел «Диск заполнен» ниже). Если всё же нужно вручную:
+
+```bash
+python3 -c "from browser_cleanup import kill_zombie_browsers; kill_zombie_browsers()"
+```
 
 ### Проблема: Chrome не запускается в headless режиме
 
@@ -436,17 +435,28 @@ Chromium упал или был убит — сессия Selenium стала н
 ```bash
 free -h
 df -h /
-pkill -9 -f chromium; pkill -9 -f chromedriver
 systemctl restart hh-bot.service
 ```
 
-При заполненном диске — см. раздел ниже. Рекомендуется апгрейд до **1 ГБ RAM**.
+Заполненный диск — самая частая скрытая причина этой ошибки (см. раздел ниже: без места Chromium не может создать профиль и падает, что выглядит как `InvalidSessionIdException`, а не как ошибка нехватки места). Рекомендуется апгрейд до **1 ГБ RAM**.
 
 ### Проблема: Диск заполнен (No space left on device)
 
-На VDS с Chromium (snap) `/tmp/snap-private-tmp` может разрастись до нескольких ГБ. Не синхронизируйте `.git` на сервер через rsync.
+На VDS с Chromium (snap) `/tmp/snap-private-tmp/snap.chromium/tmp/` может разрастись до нескольких ГБ — это осиротевшие каталоги `org.chromium.Chromium.scoped_dir.*`, которые Chromium не удаляет за собой при SIGKILL. Не синхронизируйте `.git` на сервер через rsync.
 
-**Диагностика:**
+**С версии 1.4+ бот убирает эти каталоги автоматически** перед каждым запуском (и принудительно, если свободного места меньше 2 ГБ) — это не должно повторяться. Проверить, накопилось ли что-то прямо сейчас:
+
+```bash
+ls -1d /tmp/snap-private-tmp/snap.chromium/tmp/org.chromium.Chromium.scoped_dir.* 2>/dev/null | wc -l
+```
+
+Если число растёт от запуска к запуску — значит автоматическая уборка не сработала (например, бот запущен без обновлённого кода или в системе иной путь snap-песочницы). Разовая ручная уборка:
+
+```bash
+python3 -c "from browser_cleanup import cleanup_chromium_temp_dirs; print(cleanup_chromium_temp_dirs(force=True))"
+```
+
+**Если место заняла не уборка Chromium — общая диагностика и очистка:**
 
 ```bash
 df -h /
@@ -454,12 +464,7 @@ du -sh /* 2>/dev/null | sort -rh | head -10
 du -sh /tmp/* 2>/dev/null | sort -rh | head -5
 ```
 
-**Очистка:**
-
 ```bash
-# Временные файлы Chromium (snap)
-rm -rf /tmp/snap-private-tmp/*
-
 # Старые ревизии snap
 snap set system refresh.retain=2
 snap list --all | awk '/disabled/{system("snap remove " $1 " --revision=" $3)}'
@@ -470,11 +475,11 @@ apt-get clean
 
 # Лишнее в каталоге бота (на сервере .git не нужен)
 rm -rf /opt/hh-bot/.git /opt/hh-bot/__pycache__
-find /opt/hh-bot/logs -name "*.log" -mtime +7 -delete
-find /opt/hh-bot/logs -name "*.png" -mtime +7 -delete
 
 df -h /
 ```
+
+Скриншоты ошибок (`logs/*.png`, старше 7 дней) и старые версии ChromeDriver в `~/.wdm` бот с версии 1.4+ убирает сам после каждого запуска — ручная чистка `find ... -delete` не требуется.
 
 Если `apt-get clean` пишет про lock — проверьте зависший процесс: `ps aux | grep apt` и завершите его (`kill`), затем повторите.
 
@@ -532,9 +537,8 @@ rsync -avz --exclude '.venv' --exclude '__pycache__' --exclude '*.pyc' --exclude
   --exclude '.git' --exclude '.DS_Store' --exclude 'logs/' \
   . your-server:/opt/hh-bot/
 
-# 2. На сервере: очистить зомби-процессы и перезапустить
+# 2. На сервере: перезапустить сервис (сам завершит зависшие процессы браузера)
 ssh your-server
-pkill -9 -f chromium; pkill -9 -f chromedriver
 
 # 3. Обновление зависимостей (если нужно)
 cd /opt/hh-bot

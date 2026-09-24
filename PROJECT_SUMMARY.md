@@ -114,8 +114,7 @@ rsync -avz \
   --exclude '.git' --exclude '.DS_Store' --exclude 'logs/' \
   . your-server:/opt/hh-bot/
 
-# На сервере — очистить процессы и перезапустить
-pkill -9 -f chromium; pkill -9 -f chromedriver
+# На сервере — перезапустить сервис (сам мягко завершит процессы браузера)
 systemctl restart hh-bot.service
 systemctl status hh-bot.service
 ```

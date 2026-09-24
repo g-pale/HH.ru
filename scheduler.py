@@ -4,34 +4,61 @@
 Поддерживает поднятие всех резюме за один запуск (одна авторизация для всех резюме)
 """
 
+import shutil
+import signal
 import subprocess
-import schedule
+import sys
 import time
+
+import schedule
 from loguru import logger
 from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
-from hh_bot import HHResumeBot
+
+from browser_cleanup import (
+    check_disk_space,
+    cleanup_old_screenshots,
+    cleanup_webdriver_manager_cache,
+    kill_zombie_browsers,
+)
 from config import Config
+from hh_bot import HHResumeBot
 
 MAX_RETRIES = 2
 
+# Текущий работающий бот — нужен, чтобы при остановке службы (systemctl stop,
+# SIGTERM) корректно закрыть браузер через driver.quit(), а не бросить его
+# зависшим процессом.
+_active_bot = None
+_shutdown_requested = False
 
-def kill_zombie_browsers():
-    """Убийство всех зависших процессов Chromium/Chrome перед запуском"""
-    try:
-        subprocess.run(
-            ["pkill", "-9", "-f", "chromium"], capture_output=True, timeout=5
-        )
-        subprocess.run(["pkill", "-9", "-f", "chrome"], capture_output=True, timeout=5)
-        subprocess.run(
-            ["pkill", "-9", "-f", "chromedriver"], capture_output=True, timeout=5
-        )
-        time.sleep(2)
-    except Exception:
-        pass
+
+def _handle_shutdown_signal(signum, _frame):
+    """
+    По умолчанию SIGTERM завершает процесс мгновенно, минуя весь Python-код
+    (в т.ч. finally) — браузер остался бы висеть недоубитым. Перехватываем
+    сигнал сами: закрываем текущий браузер штатно и только потом выходим.
+    """
+    global _shutdown_requested
+    _shutdown_requested = True
+    logger.warning(f"Получен сигнал {signum} — завершаем текущую работу и браузер...")
+    if _active_bot is not None:
+        try:
+            _active_bot.close()
+        except Exception:
+            pass
+    kill_zombie_browsers()
+    logger.info("Ресурсы освобождены, выходим.")
+    sys.exit(0)
+
+
+def kill_zombie_browsers_before_start():
+    """Убийство зависших процессов Chromium/Chrome перед запуском + уборка их мусора."""
+    kill_zombie_browsers()
+    time.sleep(1)
 
 
 def log_memory():
-    """Логирование текущего состояния памяти"""
+    """Логирование текущего состояния памяти и диска"""
     try:
         result = subprocess.run(
             ["free", "-h"], capture_output=True, text=True, timeout=5
@@ -40,6 +67,15 @@ def log_memory():
             lines = result.stdout.strip().split("\n")
             for line in lines:
                 logger.debug(f"Память: {line}")
+    except Exception:
+        pass
+
+    try:
+        usage = shutil.disk_usage("/")
+        logger.debug(
+            f"Диск /: занято {usage.used / (1024**3):.1f} ГБ, "
+            f"свободно {usage.free / (1024**3):.1f} ГБ из {usage.total / (1024**3):.1f} ГБ"
+        )
     except Exception:
         pass
 
@@ -85,15 +121,21 @@ def run_bot():
     Запуск бота для поднятия всех резюме за один раз
     Бот авторизуется один раз и поднимает все резюме подряд
     """
+    global _active_bot
+
     logger.info("=" * 50)
     logger.info("Запуск запланированного поднятия резюме")
     logger.info("=" * 50)
 
+    # Проверка места на диске ДО запуска браузера: заполненный диск иначе
+    # проявляется как InvalidSessionIdException и маскирует настоящую причину.
+    check_disk_space()
+
     # Убиваем зависшие процессы браузера перед запуском
     logger.debug("Очистка зомби-процессов браузера...")
-    kill_zombie_browsers()
+    kill_zombie_browsers_before_start()
 
-    # Логирование состояния памяти
+    # Логирование состояния памяти и диска
     log_memory()
 
     resume_ids = Config.get_resume_ids()
@@ -106,8 +148,10 @@ def run_bot():
     success_count = 0
     fail_count = 0
 
+    bot = HHResumeBot()
+    _active_bot = bot
     try:
-        with HHResumeBot() as bot:
+        with bot:
             for index, resume_id in enumerate(resume_ids, 1):
                 logger.info("-" * 50)
 
@@ -136,14 +180,22 @@ def run_bot():
         logger.error(f"Критическая ошибка при выполнении задачи: {e}")
         logger.exception("Детали ошибки:")
     finally:
-        # Гарантированная очистка процессов после завершения
+        _active_bot = None
+        # Гарантированная очистка процессов и осиротевших временных каталогов
         kill_zombie_browsers()
+        # То, что растёт без ограничений само по себе и не чистится loguru
+        cleanup_old_screenshots()
+        cleanup_webdriver_manager_cache()
         log_memory()
 
 
 def main():
     """Основная функция планировщика"""
     logger.add("logs/scheduler_{time}.log", rotation="1 day", retention="30 days")
+
+    # SIGTERM (systemctl stop) по умолчанию завершает процесс мгновенно —
+    # без обработчика браузер не успеет закрыться штатно.
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
 
     errors = Config.validate()
     if errors:
@@ -164,7 +216,7 @@ def main():
     logger.info("Для остановки нажмите Ctrl+C")
 
     try:
-        while True:
+        while not _shutdown_requested:
             schedule.run_pending()
             time.sleep(60)
     except KeyboardInterrupt:

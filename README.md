@@ -233,13 +233,12 @@ systemctl status hh-bot.service
 
 ### Chromium/Chrome не запускается или падает с ReadTimeoutError
 
-1. Убейте зомби-процессы: `pkill -9 -f chromium && pkill -9 -f chromedriver`
-2. Проверьте память: `free -h`
-3. Убедитесь, что браузер установлен: `chromium-browser --version`
-4. Увеличьте swap, если не хватает памяти (см. DEPLOY.md)
-5. В `.env` задайте `SELENIUM_HTTP_READ_TIMEOUT=300` и перезапустите сервис (в коде по умолчанию 240 с вместо 120)
-6. Если зависания сохраняются на слабом VDS: `BROWSER_RESTART_EACH_RESUME=true` (каждое резюме — новый браузер и повторный вход)
-7. Не включайте `CHROMIUM_SINGLE_PROCESS=true` без крайней необходимости — режим часто даёт зависания
+1. Проверьте память: `free -h` (бот с версии 1.4+ сам мягко завершает зомби-процессы браузера перед запуском)
+2. Убедитесь, что браузер установлен: `chromium-browser --version`
+3. Увеличьте swap, если не хватает памяти (см. DEPLOY.md)
+4. В `.env` задайте `SELENIUM_HTTP_READ_TIMEOUT=300` и перезапустите сервис (в коде по умолчанию 240 с вместо 120)
+5. Если зависания сохраняются на слабом VDS: `BROWSER_RESTART_EACH_RESUME=true` (каждое резюме — новый браузер и повторный вход)
+6. Не включайте `CHROMIUM_SINGLE_PROCESS=true` без крайней необходимости — режим часто даёт зависания
 
 ### `TimeoutException: Timed out receiving message from renderer`
 
@@ -254,11 +253,23 @@ Chromium упал или был убит (часто из‑за нехватк�
 ```bash
 free -h
 df -h /
-pkill -9 -f chromium; pkill -9 -f chromedriver
 systemctl restart hh-bot.service
 ```
 
-Если диск заполнен — см. раздел «Диск заполнен» в [DEPLOY.md](DEPLOY.md). Рекомендуется **1 ГБ RAM** и периодическая очистка `/tmp/snap-private-tmp`.
+Убивать Chromium вручную через `pkill -9` обычно не требуется: бот сам завершает зависшие процессы мягко (SIGTERM → SIGKILL как крайняя мера) перед каждым запуском и после него — см. `browser_cleanup.py`.
+
+Если диск заполнен — см. раздел «Диск заполнен» в [DEPLOY.md](DEPLOY.md). Рекомендуется **1 ГБ RAM**.
+
+### Диск заполняется сам по себе (осиротевшие временные профили Chromium)
+
+С версии 1.4+ бот перед каждым запуском проверяет свободное место (порог 2 ГБ) и автоматически убирает осиротевшие каталоги `org.chromium.Chromium.scoped_dir.*` из `/tmp/snap-private-tmp/snap.chromium/tmp/` — они оставались навсегда после `pkill -9`, потому что SIGKILL не даёт Chromium убрать свой временный профиль. Также автоматически чистятся старые скриншоты ошибок (`logs/*.png`, старше 7 дней) и старые версии ChromeDriver в кэше `~/.wdm`.
+
+Ручная уборка (если нужно прямо сейчас, не дожидаясь следующего запуска):
+
+```bash
+python3 -c "from browser_cleanup import cleanup_chromium_temp_dirs; print(cleanup_chromium_temp_dirs(force=True))"
+df -h /
+```
 
 ### SessionNotCreatedException: ChromeDriver only supports Chrome version X, browser is Y
 
@@ -292,9 +303,8 @@ systemctl restart hh-bot.service
      . your-server:/opt/hh-bot/
    ```
 
-2. На сервере — очистите процессы и перезапустите:
+2. На сервере — перезапустите сервис (сам мягко завершит процессы браузера):
    ```bash
-   pkill -9 -f chromium; pkill -9 -f chromedriver
    systemctl restart hh-bot.service
    systemctl status hh-bot.service
    ```
