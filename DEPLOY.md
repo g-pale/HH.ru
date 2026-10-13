@@ -348,9 +348,27 @@ systemctl restart hh-bot.service
 python3 -c "from browser_cleanup import kill_zombie_browsers; kill_zombie_browsers()"
 ```
 
+### Проблема: Chrome instance exited или DevToolsActivePort file doesn't exist
+
+На сервере бот работает из systemd, у службы нет пользовательской сессии и каталога `/run/user/0`. Snap Chromium без `XDG_RUNTIME_DIR` завершается сразу (`Chrome instance exited`). Бот с версии 1.5+ перед запуском создаёт `/tmp/hh-bot-runtime` и подставляет его в окружение.
+
+Вторая причина того же симптома — профиль в `/tmp`. Snap показывает браузеру другой `/tmp`, ChromeDriver 60 секунд ждёт `DevToolsActivePort` и не находит его. Профиль задаётся в `/var/snap/chromium/common/hh-bot-chrome`: этот путь один и тот же снаружи snap и внутри.
+
+Отдельно: snap Chromium 155 собран под glibc 2.38 и на Ubuntu 22.04 не стартует. На таком сервере нужна ревизия 154 и заморозка обновления:
+
+```bash
+snap revert chromium
+snap refresh --hold=forever chromium
+chromium --version
+```
+
+После перехода на Ubuntu 24.04 заморозку снимают командой `snap refresh --unhold chromium`.
+
+Флаги запуска: `--headless=new`. Свой `--remote-debugging-port` не задаётся — его выставляет ChromeDriver, второй порт в новых Chromium завершает браузер сразу после старта.
+
 ### Проблема: Chrome не запускается в headless режиме
 
-**Решение**: Убедитесь, что установлены все зависимости и Chrome запускается с правильными флагами. В коде уже настроен headless режим.
+**Решение**: Убедитесь, что установлены все зависимости и Chrome запускается с правильными флагами. В коде используется `--headless=new`.
 
 ### Проблема: Недостаточно памяти при установке Chrome
 
@@ -444,10 +462,15 @@ systemctl restart hh-bot.service
 
 На VDS с Chromium (snap) `/tmp/snap-private-tmp/snap.chromium/tmp/` может разрастись до нескольких ГБ — это осиротевшие каталоги `org.chromium.Chromium.scoped_dir.*`, которые Chromium не удаляет за собой при SIGKILL. Не синхронизируйте `.git` на сервер через rsync.
 
-**С версии 1.4+ бот убирает эти каталоги автоматически** перед каждым запуском (и принудительно, если свободного места меньше 2 ГБ) — это не должно повторяться. Проверить, накопилось ли что-то прямо сейчас:
+**С версии 1.4+ бот убирает эти каталоги автоматически** перед каждым запуском (и принудительно, если свободного места меньше 2 ГБ) — это не должно повторяться.
+
+С версии 1.5+ профиль Chromium — каталог `/var/snap/chromium/common/hh-bot-chrome`. Он нужен, потому что snap подменяет `/tmp` и ChromeDriver иначе не видит `DevToolsActivePort`. Каталог постоянный по пути, но бот стирает его после каждого закрытия браузера (и принудительно, если свободно меньше 2 ГБ). Иначе кэш страниц hh.ru копится между запусками, а старые cookies ломают вход.
+
+Проверить, накопилось ли что-то прямо сейчас (оба числа должны быть `0`, когда бот не в середине прогона):
 
 ```bash
 ls -1d /tmp/snap-private-tmp/snap.chromium/tmp/org.chromium.Chromium.scoped_dir.* 2>/dev/null | wc -l
+du -sh /var/snap/chromium/common/hh-bot-chrome 2>/dev/null || echo 0
 ```
 
 Если число растёт от запуска к запуску — значит автоматическая уборка не сработала (например, бот запущен без обновлённого кода или в системе иной путь snap-песочницы). Разовая ручная уборка:
@@ -574,7 +597,7 @@ tar -czf /root/hh-bot-backups/hh-bot-$(date +%Y%m%d).tar.gz -C /opt hh-bot
 ### Текущая конфигурация
 
 - **Сервер**: VDS сервер (Ubuntu 22.04)
-- **Браузер**: Chromium (snap версия)
+- **Браузер**: Chromium 154 (snap), обновление snap заморожено на Ubuntu 22.04
 - **Интервал запуска**: Каждые 5 часов
 - **Расположение**: `/opt/hh-bot`
 - **Сервис**: `hh-bot.service` (systemd)

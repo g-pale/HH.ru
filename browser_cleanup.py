@@ -33,6 +33,12 @@ from loguru import logger
 
 MIN_FREE_DISK_GB_DEFAULT = 2
 
+# Каталог для сокетов Chromium. У службы systemd нет сессии logind, поэтому
+# /run/user/0 не существует, а snap не имеет права его создать. Без своего
+# XDG_RUNTIME_DIR обёртка Chromium падает сразу, и ChromeDriver пишет
+# "Chrome instance exited".
+BROWSER_RUNTIME_DIR = "/tmp/hh-bot-runtime"
+
 # Snap изолирует /tmp контейнера Chromium: путь "/tmp/..." виден таким ТОЛЬКО
 # изнутри песочницы браузера. Снаружи (там, где работает этот Python-процесс)
 # тот же каталог лежит по хостовому пути ниже. Чистить нужно именно его.
@@ -101,6 +107,73 @@ def kill_processes_gracefully(patterns=None, term_wait_sec=3):
         )
 
 
+def _chrome_profile_path() -> str:
+    snap_common = "/var/snap/chromium/common"
+    if os.path.isdir(snap_common):
+        return os.path.join(snap_common, "hh-bot-chrome")
+    return os.path.expanduser("~/hh-bot-chrome")
+
+
+def chrome_user_data_dir() -> str:
+    """
+    Каталог профиля, видимый и ChromeDriver на хосте, и Chromium внутри snap.
+
+    Snap подменяет /tmp своим каталогом. ChromeDriver создаёт профиль в /tmp
+    и ждёт там DevToolsActivePort, а браузер пишет файл уже в другой /tmp.
+    Через 60 секунд это выглядит как "DevToolsActivePort file doesn't exist".
+    Общий каталог snap (/var/snap/chromium/common) с обеих сторон один и тот же.
+
+    Каталог постоянный, поэтому сам он не очищается: его стирает
+    cleanup_chrome_profile() после каждого закрытия браузера.
+    """
+    path = _chrome_profile_path()
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    return path
+
+
+def cleanup_chrome_profile(force: bool = False, wait_sec: float = 5) -> bool:
+    """
+    Стереть профиль браузера целиком: кэш, cookies, историю.
+
+    Без этого кэш страниц hh.ru копится в одном каталоге от запуска к запуску.
+    Старые cookies к тому же ломают вход: страница логина сразу уводит на
+    главную, и бот не находит поле email.
+
+    Удаляем только когда процессов chromium не осталось. После driver.quit()
+    они завершаются не мгновенно, поэтому ждём до wait_sec секунд.
+    """
+    path = _chrome_profile_path()
+    if not os.path.isdir(path):
+        return False
+
+    if not force:
+        deadline = time.time() + wait_sec
+        while _pgrep_pids("chromium"):
+            if time.time() >= deadline:
+                logger.debug("Chromium ещё работает — профиль не стираем")
+                return False
+            time.sleep(0.5)
+
+    shutil.rmtree(path, ignore_errors=True)
+    logger.debug(f"Профиль Chromium удалён: {path}")
+    return True
+
+
+def ensure_browser_runtime() -> str:
+    """
+    Подготовить XDG_RUNTIME_DIR до любого вызова chromium/chromedriver.
+    Каталог в /tmp snap может создать сам; /run/user/0 — нет.
+    """
+    runtime = BROWSER_RUNTIME_DIR
+    os.makedirs(runtime, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(runtime, 0o700)
+    except OSError:
+        pass
+    os.environ["XDG_RUNTIME_DIR"] = runtime
+    return runtime
+
+
 def kill_zombie_browsers():
     """Убийство зависших процессов Chromium/Chrome/chromedriver (мягко) + уборка их мусора."""
     try:
@@ -109,6 +182,7 @@ def kill_zombie_browsers():
     except Exception:
         pass
     cleanup_chromium_temp_dirs()
+    cleanup_chrome_profile()
 
 
 def cleanup_chromium_temp_dirs(force: bool = False) -> int:
@@ -166,6 +240,7 @@ def check_disk_space(min_free_gb: float = MIN_FREE_DISK_GB_DEFAULT, path: str = 
             f"временных файлов Chromium перед запуском браузера..."
         )
         cleanup_chromium_temp_dirs(force=True)
+        cleanup_chrome_profile(force=True)
         try:
             free_gb = shutil.disk_usage(path).free / (1024**3)
             logger.info(f"После уборки свободно на {path}: {free_gb:.1f} ГБ")

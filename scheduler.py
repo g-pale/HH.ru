@@ -18,6 +18,7 @@ from browser_cleanup import (
     check_disk_space,
     cleanup_old_screenshots,
     cleanup_webdriver_manager_cache,
+    ensure_browser_runtime,
     kill_zombie_browsers,
 )
 from config import Config
@@ -192,6 +193,7 @@ def run_bot():
 def main():
     """Основная функция планировщика"""
     logger.add("logs/scheduler_{time}.log", rotation="1 day", retention="30 days")
+    ensure_browser_runtime()
 
     # SIGTERM (systemctl stop) по умолчанию завершает процесс мгновенно —
     # без обработчика браузер не успеет закрыться штатно.

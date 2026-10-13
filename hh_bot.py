@@ -3,7 +3,6 @@
 Поддерживает два метода: через API и через веб-автоматизацию
 """
 
-import random
 import re
 import time
 import requests
@@ -27,7 +26,12 @@ from selenium.common.exceptions import (
 from selenium.webdriver.common.action_chains import ActionChains
 from webdriver_manager.chrome import ChromeDriverManager
 
-from browser_cleanup import kill_zombie_browsers
+from browser_cleanup import (
+    chrome_user_data_dir,
+    cleanup_chrome_profile,
+    ensure_browser_runtime,
+    kill_zombie_browsers,
+)
 from config import Config
 
 
@@ -81,6 +85,7 @@ class HHResumeBot:
                 pass
             self.driver = None
         self._is_logged_in = False
+        cleanup_chrome_profile()
 
     def _apply_navigation_timeouts(self):
         """Таймауты навигации = SELENIUM_HTTP_READ_TIMEOUT (раньше был потолок 180 с — Chrome ронял рендерер ~155 с)."""
@@ -222,8 +227,16 @@ class HHResumeBot:
             pls = "normal"
         chrome_options.page_load_strategy = pls
 
+        ensure_browser_runtime()
+        # Остаток от аварийно завершённого прошлого запуска
+        cleanup_chrome_profile()
+        profile_dir = chrome_user_data_dir()
+        chrome_options.add_argument(f"--user-data-dir={profile_dir}")
+        logger.debug(f"Профиль Chromium: {profile_dir}")
+
         if self.config.HEADLESS_BROWSER:
-            chrome_options.add_argument("--headless")
+            # Старый --headless в Chromium 155+ сразу завершает процесс.
+            chrome_options.add_argument("--headless=new")
 
         # Флаги для работы на сервере без GUI
         chrome_options.add_argument("--no-sandbox")
@@ -299,16 +312,25 @@ class HHResumeBot:
                 browser_name = "Chrome"
                 browser_path = None
 
-            browser_version = (
+            browser_version_raw = (
                 subprocess.check_output(
-                    [browser_cmd, "--version"], stderr=subprocess.STDOUT
+                    [browser_cmd, "--version"],
+                    stderr=subprocess.STDOUT,
                 )
                 .decode()
                 .strip()
             )
-            logger.debug(f"{browser_name} найден: {browser_version}")
+            version_line = next(
+                (
+                    line
+                    for line in browser_version_raw.splitlines()
+                    if re.search(r"Chromium|Chrome", line, re.I)
+                ),
+                browser_version_raw,
+            )
+            logger.debug(f"{browser_name} найден: {version_line}")
             # Извлекаем мажорную версию (например 145 из "Chromium 145.0.7632.109")
-            driver_version_match = re.search(r"(\d+)\.\d+\.\d+", browser_version)
+            driver_version_match = re.search(r"(\d+)\.\d+\.\d+", version_line)
             driver_version = (
                 driver_version_match.group(1) if driver_version_match else None
             )
@@ -344,9 +366,8 @@ class HHResumeBot:
         if self.config.CHROMIUM_SINGLE_PROCESS:
             chrome_options.add_argument("--single-process")
         chrome_options.add_argument("--disable-setuid-sandbox")
-        chrome_options.add_argument(
-            f"--remote-debugging-port={random.randint(20000, 59999)}"
-        )
+        # Свой --remote-debugging-port не задаём: ChromeDriver выставляет его сам,
+        # второй порт в Chromium 155 завершает браузер сразу после старта.
         chrome_options.add_argument("--disable-ipc-flooding-protection")
         chrome_options.add_argument("--disable-renderer-backgrounding")
         chrome_options.add_argument("--disable-backgrounding-occluded-windows")

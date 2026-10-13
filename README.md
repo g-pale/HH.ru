@@ -264,12 +264,28 @@ systemctl restart hh-bot.service
 
 С версии 1.4+ бот перед каждым запуском проверяет свободное место (порог 2 ГБ) и автоматически убирает осиротевшие каталоги `org.chromium.Chromium.scoped_dir.*` из `/tmp/snap-private-tmp/snap.chromium/tmp/` — они оставались навсегда после `pkill -9`, потому что SIGKILL не даёт Chromium убрать свой временный профиль. Также автоматически чистятся старые скриншоты ошибок (`logs/*.png`, старше 7 дней) и старые версии ChromeDriver в кэше `~/.wdm`.
 
+С версии 1.5+ профиль браузера лежит в `/var/snap/chromium/common/hh-bot-chrome` (этот каталог виден и ChromeDriver, и Chromium внутри snap) и стирается целиком после каждого закрытия браузера. Между запусками его быть не должно:
+
+```bash
+pgrep -c chromium || true
+du -sh /var/snap/chromium/common/hh-bot-chrome 2>/dev/null || echo 0
+ls -1d /tmp/snap-private-tmp/snap.chromium/tmp/org.chromium.Chromium.scoped_dir.* 2>/dev/null | wc -l
+```
+
+Пока идёт прогон, профиль занимает десятки мегабайт. После завершения оба размера должны быть нулевыми.
+
 Ручная уборка (если нужно прямо сейчас, не дожидаясь следующего запуска):
 
 ```bash
 python3 -c "from browser_cleanup import cleanup_chromium_temp_dirs; print(cleanup_chromium_temp_dirs(force=True))"
 df -h /
 ```
+
+### Chrome instance exited / DevToolsActivePort file doesn't exist
+
+Служба systemd не имеет `/run/user/0`. Бот с версии 1.5+ сам задаёт `XDG_RUNTIME_DIR=/tmp/hh-bot-runtime`. Профиль должен быть в `/var/snap/chromium/common/hh-bot-chrome`: snap подменяет `/tmp`, и файл `DevToolsActivePort` иначе оказывается не там, где его ждёт ChromeDriver.
+
+На Ubuntu 22.04 snap Chromium 155 не запускается (нужна glibc 2.38). Рабочая ревизия — 154, обновление chromium лучше держать замороженным: `snap refresh --hold=forever chromium`. Снять заморозку можно после обновления системы до Ubuntu 24.04.
 
 ### SessionNotCreatedException: ChromeDriver only supports Chrome version X, browser is Y
 
