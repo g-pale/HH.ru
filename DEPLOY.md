@@ -435,7 +435,7 @@ apt install -y google-chrome-stable
 
 ### Проблема: SessionNotCreatedException — ChromeDriver supports Chrome X, browser is Y
 
-Chromium (snap/apt) мог обновиться, а ChromeDriver в кэше остался старым. Сделайте:
+Две разные причины. Chromium обновился, а в кэше остался старый ChromeDriver. Либо, наоборот, браузер закреплён (на этом сервере Chromium 154), а `webdriver-manager` скачал свежий драйвер: до версии 1.5.1 бот передавал только мажор `154`, и библиотека находила его как подстроку в номере сборки Chrome 159. С 1.5.1 передаётся полная версия браузера. Если ошибка уже есть в кэше:
 
 ```bash
 rm -rf /root/.wdm/ /opt/hh-bot/.wdm/ ~/.cache/selenium/

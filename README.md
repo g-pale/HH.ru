@@ -289,7 +289,7 @@ df -h /
 
 ### SessionNotCreatedException: ChromeDriver only supports Chrome version X, browser is Y
 
-Версия браузера и драйвера не совпадают (часто после автообновления Chromium). Обновите код — бот сам подбирает ChromeDriver под текущую версию. Если ошибка остаётся, на сервере выполните: `rm -rf /root/.wdm/ /opt/hh-bot/.wdm/ ~/.cache/selenium/` и `systemctl restart hh-bot.service`. Подробнее в DEPLOY.md.
+Версия браузера и драйвера не совпадают. С версии 1.5.1 бот передаёт в ChromeDriver полную версию Chromium (`154.0.8037.57`), а не мажор. Мажор `154` в `webdriver-manager` ищется как подстрока и совпадает со сборкой свежего драйвера (у Chrome 159 в номере есть `154`), после чего драйвер отказывается открывать закреплённый Chromium 154. Если ошибка остаётся, на сервере выполните: `rm -rf /root/.wdm/ /opt/hh-bot/.wdm/ ~/.cache/selenium/` и `systemctl restart hh-bot.service`. Подробнее в DEPLOY.md.
 
 ### Селекторы не работают
 

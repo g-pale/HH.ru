@@ -329,8 +329,10 @@ class HHResumeBot:
                 browser_version_raw,
             )
             logger.debug(f"{browser_name} найден: {version_line}")
-            # Извлекаем мажорную версию (например 145 из "Chromium 145.0.7632.109")
-            driver_version_match = re.search(r"(\d+)\.\d+\.\d+", version_line)
+            # Полная версия, не мажор. webdriver-manager ищет переданный номер
+            # как подстроку: "154" совпадает с драйвером 159 (сборка содержит 154)
+            # и ChromeDriver отказывается открывать Chromium 154.
+            driver_version_match = re.search(r"(\d+\.\d+\.\d+\.\d+)", version_line)
             driver_version = (
                 driver_version_match.group(1) if driver_version_match else None
             )
